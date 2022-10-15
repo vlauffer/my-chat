@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+    <style>
+        .btn-group button {
+          background-color: #04AA6D; /* Green background */
+          border: 1px solid green; /* Green border */
+          color: white; /* White text */
+          padding: 10px 24px; /* Some padding */
+          cursor: pointer; /* Pointer/hand icon */
+          width: 50%; /* Set a width if needed */
+          display: block; /* Make the buttons appear below each other */
+        }
+        
+        .btn-group button:not(:last-child) {
+          border-bottom: none; /* Prevent double borders */
+        }
+        
+        /* Add a background color on hover */
+        .btn-group button:hover {
+          background-color: #3e8e41;
+        }
+
+
+    </style>
+    <head>
+        <meta charset="UTF-8">
+        <title>Shrek-off</title>
+    </head>
+    <body>
+        <h1>Shrek-off</h1>
+
+        <input id="username" style="display:block; width:100px; box-sizing: border-box" type="text" placeholder="username">
+        <button id="join-chat" type="button">join chat</button>
+        <textarea id="chat" style="display:block; width:600px; height:120px; box-sizing: border-box" cols="30" rows="10"></textarea>
+        <input id="input" style="display:block; width:600px; box-sizing: border-box" type="text" placeholder="chat">
+        <button id="req_btn" type="button">ready up</button>
+
+        <script>
+            const username = document.querySelector("#username");
+            const join_btn = document.querySelector("#join-chat");
+            const textarea = document.querySelector("#chat");
+            const input = document.querySelector("#input");
+            const req_btn = document.querySelector("#req_btn");
+            var questions = [];
+
+            join_btn.addEventListener("click", function(e) {
+
+                fetch("http://localhost:3000/12").then (r=>{
+                    console.log(r)
+                });
+
+                this.disabled = true;
+
+                const websocket = new WebSocket("ws://localhost:3000/websocket/12");
+
+                websocket.onopen = function() {
+                    console.log("connection opened");
+                    websocket.send(username.value);
+                }
+
+                const btn = this;
+
+                websocket.onclose = function() {
+                    console.log("connection closed");
+                    btn.disabled = false;
+                }
+
+                websocket.onmessage = function(e) {
+                    console.log("received message: "+e.data);
+                    var data = JSON.parse(e.data)
+                    if(data.sm_type=="message"){
+                        
+                        textarea.value += data.username+ data.payload+"\r\n";
+                    }else if(data.sm_type==="join"){
+
+                        textarea.value += data.payload+"\r\n";
+                    } else if(data.sm_type === "qa_list"){
+
+                        questions = data.payload;
+                        console.log(data.payload)
+                        // let question_header = document.createElement("h1");
+                        
+                        questions.forEach(q => {
+                            let btn_section = document.createElement("div");
+                            btn_section.append(q.question);
+                            btn_section.classList.add("btn-group");
+                            
+                            q.answers.forEach(answer => {
+                                let btn = document.createElement("button");
+                                btn.innerHTML = answer.ans;
+                                btn.type = "submit";
+                                btn.name = "questionBtn";
+                                btn_section.appendChild(btn);
+                            });
+                            
+                            document.body.appendChild(btn_section)
+                        });
+                        // for(var i = 0; i<questions.length; i++){
+                        //     console.log(i)
+                        //     let btn = document.createElement("button");
+                        //     btn.innerHTML = questions[i].ans;
+                        //     btn.type = "submit";
+                        //     btn.name = "questionBtn";
+                        //     btn_section.appendChild(btn);
+                        // }
+                        // ;
+                        // console.log(data);
+                    }
+                    
+                    
+                    
+                }
+
+                input.onkeydown = function(e) {
+                    if (e.key == "Enter") {
+                        var jsonstr = JSON.stringify({
+                            username: username.value,
+                            sm_type: "message",
+                            payload: input.value
+                        })
+                        websocket.send(jsonstr);
+                        input.value = "";
+                    }
+                }
+
+                req_btn.addEventListener("click", function(e){
+                    websocket.send(JSON.stringify({
+                        username: username.value,
+                        sm_type: "ready",
+                        payload: `${username.value} is ready`
+                    }));
+                    console.log('ribbit')
+                });
+
+
+            });
+        </script>
+    </body>
+</html>

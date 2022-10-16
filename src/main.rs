@@ -1,10 +1,4 @@
-//! Example chat application.
-//!
-//! Run with
-//!
-//! ```not_rust
-//! cd examples && cargo run -p example-chat
-//! ```
+// I have no clue what i am doing
 mod qa_structs;
 use qa_structs::*;
 mod query_helper;
@@ -41,7 +35,6 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use rand::{self, thread_rng};
 
-
 // Our shared state
 struct AppState {
     user_set: Mutex<HashSet<String>>,
@@ -67,6 +60,7 @@ struct RoomStateTest{
     qa_list: Vec<ShrekQA>,
     count_ready: u32
 }
+
 impl RoomStateTest {
     fn new() -> Self{
         Self{
@@ -81,7 +75,6 @@ impl RoomStateTest {
 struct AppStateController{
     rooms: Mutex<HashMap<String, RoomStateTest>>
 }
-
 
 enum SMType{
     Message,
@@ -111,18 +104,6 @@ struct SocketMessage{
     payload: String
 }
 
-#[derive(Deserialize, Debug)]
-struct User {
-    username: String,
-}
-
-async fn create_user(extract::Json(payload): extract::Json<User>) {
-    // payload is a `CreateUser`
-    print!("{:?}", payload);
-    print!("recieved user");
-}
-// const THING: u32 = 0xABAD1DEA;
-
 #[tokio::main]
 async fn main() {
 
@@ -135,31 +116,15 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
     
-    let user_set = Mutex::new(HashSet::new());
-    let (tx, _rx) = broadcast::channel(100);
-    
-    let mut question_list: Vec<ShrekQA> = vec![];
-    if let Ok(ql) = extract_csv(){
-        question_list = ql;
-    }
-    let app_state = Arc::new(AppState { 
-        user_set, 
-        tx, 
-        qa_list: question_list, 
-        count_ready: Mutex::new(0)
-    });
-
     let app_state_all = Arc::new(AppStateController{
         rooms: Mutex::new( HashMap::new())
     });
-    // let app_state = Arc::new()
-    // let asa: Vec<Arc<RoomState>> = vec![];
 
     let app = Router::with_state(app_state_all)
         .route("/", get(index))
         // .route("/create_room", get(create_room))
-        .route("/websocket/:id", get(join_handler))
-        .route("/:id", get(join_handler));
+        .route("/websocket/:id", get(join_room))
+        .route("/:id", get(check_room));
         // .route("/websocket", get(websocket_handler));
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -197,13 +162,13 @@ async fn create_room(
 }
 
 
-// async fn join_room(
-//     ws: WebSocketUpgrade,
-//     State(state): State<Arc<Mutex<AppStateAll>>>,
-// ) -> impl IntoResponse {
-//     let room = state.lock().unwrap().rooms[0].clone();
-//     ws.on_upgrade(|socket| websocket(socket, room))
-// }
+async fn join_room(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppStateController>>,
+    Path(rid): Path<String>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| websocket(socket, state, rid))
+}
 
 async fn extract_params(Query(params): Query<Params>) -> Option<usize> {
     
@@ -221,8 +186,29 @@ async fn extract_params(Query(params): Query<Params>) -> Option<usize> {
     }
 }
 
-async fn check_room() -> Response{
-    (StatusCode::OK).into_response()
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct RoomCheck{
+    joinable: bool,
+    room: String
+}
+
+async fn check_room(
+    Path(rid): Path<String>,
+    State(state): State<Arc<AppStateController>>
+) -> impl IntoResponse {
+    let state_clone = state.clone();
+    let rooms = state_clone.rooms.lock().unwrap();
+    match rooms.contains_key(&rid) {
+        true => {
+            let help = RoomCheck{joinable: true, room: rid};
+            return (StatusCode::FOUND, Json(help))
+        },
+
+        _ => {
+            let help = RoomCheck{joinable: true, room: rid};
+            return (StatusCode::NOT_FOUND, Json(help))
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -230,53 +216,23 @@ struct RoomId{
     rid: u32
 }
 
-// #[axum_macros::debug_handler]
-async fn join_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<Arc<AppStateController>>,
-    Path(rid): Path<u32>
-) -> impl IntoResponse {
 
-    let s_clone  = state.clone();
-    // let room = rid;
-    let room = RoomId{
-        rid: 32
-    };
 
-    // let mut rooms = s_clone.rooms.lock().unwrap();
-    // if let res = rooms.contains_key(&room.rid.to_string()){
-    //     tracing::debug!("key {} find", room.rid);
-    //     // (format!("does contain key {}", room.rid)).into_response()
-    //     // ws.on_upgrade(|socket| websocket(
-    //     //     socket, 
-    //     //     state
-    //     // ))
+async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: String) {
 
-    // } else {
-    //     // (format!("does not contain key {}", room.rid)).into_response()
-    // }
-    tracing::debug!("Doctor, we have a successful fusion reaction ");
-    ( Json(room)).into_response()
-    // StatusCode::INTERNAL_SERVER_ERROR.into_response()
-    // Error::new("error")
+    tracing::debug!("websocket room {}", rid);
+
+    let mut username = String::new();
 }
-
-// #[debug_handler]
-// async fn websocket_handler(
-//     ws: WebSocketUpgrade,
-//     State(state): State<Arc<AppState>>,
-// ) -> impl IntoResponse {
-//     ws.on_upgrade(|socket| websocket(socket, state))
-// }
 
 // async fn websocket(stream: WebSocket, state: Arc<AppStateController>) {
 
-//     // By splitting we can send and receive at the same time.
-//     let (mut sender, mut receiver) = stream.split();
+    // // By splitting we can send and receive at the same time.
+    // let (mut sender, mut receiver) = stream.split();
     
-//     // Username gets set in the receive loop, if it's valid.
-//     let mut username = String::new();
-//     // Loop until a text message is found.
+    // // Username gets set in the receive loop, if it's valid.
+    // let mut username = String::new();
+    // // Loop until a text message is found.
 //     while let Some(Ok(message)) = receiver.next().await {
 //         if let Message::Text(name) = message {
 //             // If username that is sent by client is not taken, fill username string.

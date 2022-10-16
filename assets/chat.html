@@ -23,8 +23,10 @@
 
     </style>
     <head>
+        
         <meta charset="UTF-8">
         <title>Shrek-off</title>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     </head>
     <body>
         <h1>Shrek-off</h1>
@@ -36,6 +38,7 @@
         <button id="req_btn" type="button">ready up</button>
 
         <script>
+
             const username = document.querySelector("#username");
             const join_btn = document.querySelector("#join-chat");
             const textarea = document.querySelector("#chat");
@@ -43,14 +46,9 @@
             const req_btn = document.querySelector("#req_btn");
             var questions = [];
 
-            join_btn.addEventListener("click", function(e) {
-
-                fetch("http://localhost:3000/12").then (r=>{
-                    console.log(r)
-                });
-
-                this.disabled = true;
-
+            const handleWebsockets = (rid) => {
+                
+                console.log(rid)
                 const websocket = new WebSocket("ws://localhost:3000/websocket/12");
 
                 websocket.onopen = function() {
@@ -131,8 +129,18 @@
                     }));
                     console.log('ribbit')
                 });
+            }
 
+            join_btn.addEventListener("click", function(e) {
 
+                fetch("http://localhost:3000/12")
+                .then(response => response.json()).then(r => {
+                    if (r.joinable){
+                        handleWebsockets(r.room);
+                        this.disabled = true;
+                    }
+                    console.log(r);
+                });
             });
         </script>
     </body>

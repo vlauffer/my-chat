@@ -19,6 +19,8 @@ use axum::{
     Router, Json, http::StatusCode,
     Error
 };
+
+// use fmt::{Display};
 use serde_json::{self, Value};
 use serde::{Serialize, Deserialize};
 
@@ -26,7 +28,7 @@ use serde::{Serialize, Deserialize};
 use futures::{sink::SinkExt, stream::StreamExt};
 
 use std::{
-    
+    fmt,
     collections::{HashMap, HashSet},
     net::SocketAddr,
     sync::{Arc, Mutex}, ops::Shr, os::macos::raw::stat,
@@ -70,27 +72,23 @@ impl RoomState {
     }
 }
 struct AppStateController{
-    rooms: Mutex<HashMap<String, RoomState>>
+    rooms: RwLock<HashMap<String, RoomState>>
 }
 
+#[derive(Debug)]
 enum SMType{
     Message,
     Answer, //could use custom enums here
     Ready,
     QA_list,
     Join
-
 }
 
-impl SMType{
-    fn as_str(&self) -> String {
-        match self {
-            SMType::Message => format!("message"),
-            SMType::Answer => format!("answer"), //could use custom enums here
-            SMType::Ready => format!("Ready"),
-            SMType::QA_list => format!("qa_list"),
-            SMType::Join => format!("join")
-        }
+impl fmt::Display for SMType{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+        // or, alternatively:
+        // fmt::Debug::fmt(self, f)
     }
 }
 
@@ -114,7 +112,7 @@ async fn main() {
         .init();
     
     let app_state_all = Arc::new(AppStateController{
-        rooms: Mutex::new( HashMap::new())
+        rooms: RwLock::new( HashMap::new())
     });
 
     let app = Router::with_state(app_state_all)
@@ -194,7 +192,7 @@ async fn check_room(
     State(state): State<Arc<AppStateController>>
 ) -> impl IntoResponse {
     let state_clone = state.clone();
-    let rooms = state_clone.rooms.lock().unwrap();
+    let rooms = state_clone.rooms.read().await;
     match rooms.contains_key(&rid) {
         true => {
             let help = RoomCheck{joinable: true, room: rid};
@@ -212,8 +210,6 @@ async fn check_room(
 struct RoomId{
     rid: u32
 }
-
-
 
 async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: String) {
 
@@ -236,7 +232,7 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
             {
                 // let state_clone = state.clone();
                 let rid_clone = rid.clone();
-                let mut rooms = state.rooms.lock().unwrap();
+                let mut rooms = state.rooms.write().await;
                 let room = rooms.entry(rid_clone).or_insert(RoomState::new());
                 // room_state = *room;
                 tx = Some(room.tx.clone());
@@ -245,8 +241,6 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
                     username = name.clone();
                 }
             }
-            
-
             // If not empty we want to quit the loop else we want to quit function.
             if tx.is_some() && !username.is_empty() {
    
@@ -262,8 +256,6 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
         }
     }
 
-    
-
     // We know if the loop exited `tx` is not `None`.
     let tx = tx.unwrap();
     // Subscribe before sending joined message.
@@ -272,7 +264,16 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
     // Send joined message to all subscribers.
     let msg = format!("{} joined.", username);
     tracing::debug!("{}", msg);
-    let _ = tx.send(msg);
+    let m = SocketMessage{
+        username: username.clone(),
+        payload: msg ,
+        sm_type: SMType::Join.to_string(),
+    };
+    let str_mes = serde_json::to_string(&m).unwrap();
+    let _ = tx.send(str_mes );
+
+
+    // let mut app_state = state.;
 
     // This task will receive broadcast messages and send text message to our client.
     let mut send_task = tokio::spawn(async move {
@@ -283,7 +284,10 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
             }
         }
     });
-
+    
+    let my_rid= rid.clone();
+    // let my_rid = Arc::new(rid.clone());
+    // let app
     // We need to access the `tx` variable directly again, so we can't shadow it here.
     // I moved the task spawning into a new block so the original `tx` is still visible later.
     let mut recv_task = {
@@ -303,30 +307,31 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
                         let m = SocketMessage{
                             username: name.clone(),
                             payload: format!(": {}", socket_message.payload) ,
-                            sm_type: SMType::Message.as_str(),
+                            sm_type: SMType::Message.to_string(),
                         };
                         let str_mes = serde_json::to_string(&m).unwrap();
                         let _ = tx.send(str_mes );
                     },
                     "ready" => {
                         tracing::debug!("{name} is ready");
-                        
-                        // let rid_clone = rid.clone();
-                        let mut rooms = &mut state.rooms.lock().unwrap();
-                        let mut room = rooms.entry(rid.clone()).or_insert(RoomState::new());
-                        if !room.count_ready.contains(&name) {
-                            room.count_ready.insert(name.to_owned());
-                            // username = name.clone();
-                        }
-                        if room.count_ready.len()>=room.user_set.len(){
-                            tracing::debug!("Starting game"); 
-                            let rsc = room.qa_list.to_vec();
-                            let sm = SocketMessageQAList{
-                                payload: rsc,
-                                sm_type: SMType::QA_list.as_str()
-                            }; 
-                            let _ = tx.send(serde_json::to_string(&sm).unwrap());
-                        }
+                           
+                            let more_rid = &my_rid;
+                            let mut rooms = state.rooms.write().await;
+                            let mut room = rooms.entry(more_rid.to_string()).or_insert(RoomState::new());
+                            // let c = check_start(room, &mut name);
+                            if !room.count_ready.contains(&name) {
+                                room.count_ready.insert(name.to_owned());
+                                // username = name.clone();
+                            }
+                            if room.count_ready.len()>=room.user_set.len(){
+                                tracing::debug!("Starting game"); 
+                                let rsc = room.qa_list.to_vec();
+                                let sm = SocketMessageQAList{
+                                    payload: rsc,
+                                    sm_type: SMType::QA_list.to_string()
+                                }; 
+                                let _ = tx.send(serde_json::to_string(&sm).unwrap());
+                            }       
                     },
                     "answer" => tracing::debug!("ans"),
                     // _ if socket_message.sm_type.equals("message") => print!("message"),
@@ -339,7 +344,17 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
     // If any one of the tasks exit, abort the other.
     tokio::select! {
         _ = (&mut send_task) => recv_task.abort(),
-        _ = (&mut recv_task) => send_task.abort(),
+        _ = (&mut recv_task) => {
+            let msg = format!("{} left.", username);
+            tracing::debug!("{}", msg);
+            let _ = tx.send(msg);
+            // let more_rid = my_rid;
+            // let mut rooms =  state.rooms.write().await;
+            // let mut room = rooms.entry(rid.clone()).or_insert(RoomState::new());
+            // room.
+            send_task.abort()
+
+        }
     };
 
 
@@ -347,7 +362,11 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
     let msg = format!("{} left.", username);
     tracing::debug!("{}", msg);
     let _ = tx.send(msg);
-    // let mut rooms = state.rooms.lock().unwrap();
+
+    
+    
+    
+    
 
     // Remove username from map so new clients can take it.
     // rooms.get_mut(&channel).unwrap().user_set.remove(&username);
@@ -356,16 +375,18 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
 }
 
 
-// fn check_start(state: &mut RoomState, user: &mut String) -> bool{
-//     let mut ready = &state.count_ready;
-//     // state.count_ready.
-//     state.count_ready.get_or_insert(user);
-//     // if !ready.contains(&user.to_string()){
-//     //     // ready.insert(format!("hel"));
-//     //     ready.insert(user.to_string());
+// fn check_start(room: &mut RoomState, user: &mut String) -> bool{
+//     let mut users_ready = room.count_ready;
+//     if !users_ready.contains(user) {
+//         users_ready.insert(format!("user.to_owned()"));
+//         // username = name.clone();
+//     }
+//     // let mut room = rooms.entry(rid.clone()).or_insert(RoomState::new());
+//     // if !room.count_ready.contains(&name) {
+//     //     room.count_ready.insert(name.to_owned());
+//     //     // username = name.clone();
 //     // }
-    
-//     ready.len()  >= state.user_set.len()
+//     users_ready.len()>=room.user_set.len()
 // }
 
 fn check_username(state: &AppState, string: &mut String, name: &str) {

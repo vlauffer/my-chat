@@ -68,13 +68,13 @@
                 websocket.onmessage = function(e) {
                     console.log("received message: "+e.data);
                     var data = JSON.parse(e.data)
-                    if(data.sm_type=="message"){
+                    if(data.sm_type=="Message"){
                         
                         textarea.value += data.username+ data.payload+"\r\n";
-                    }else if(data.sm_type==="join"){
-
+                    }else if(data.sm_type==="Join"){
+                        console.log(data);
                         textarea.value += data.payload+"\r\n";
-                    } else if(data.sm_type === "qa_list"){
+                    } else if(data.sm_type === "QA_list"){
 
                         questions = data.payload;
                         console.log(data.payload)

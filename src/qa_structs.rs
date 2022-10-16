@@ -44,7 +44,8 @@ pub struct SocketMessageQAList{
 pub fn extract_csv( ) -> Result<Vec<ShrekQA>, Box<dyn Error>>{
 
     let mut shrekQA_vec: Vec<ShrekQA> = vec![];
-    let mut rdr = csv::Reader::from_path("../assets/shrek_qas.csv")?;
+    print!("ssss");
+    let mut rdr = csv::Reader::from_path("./assets/shrek_qas.csv")?;
     for r in rdr.deserialize(){
         let mut ans_vec = vec![];
         let rec_base: ShrekQAbase = r?;

@@ -41,7 +41,7 @@ use rand::{self, thread_rng};
 // Our shared state
 
 struct RoomState{
-    user_set: Arc<RwLock<HashSet<String>>>,
+    user_set: HashSet<String>,
     tx: broadcast::Sender<String>,
     qa_list: Vec<ShrekQA>,
     count_ready: HashSet<String>
@@ -50,7 +50,7 @@ struct RoomState{
 impl RoomState {
     fn new() -> Self{
         Self{
-            user_set: Arc::new(RwLock::new(HashSet::new())),
+            user_set: HashSet::new(),
             tx: broadcast::channel(100).0,
             qa_list: extract_csv().unwrap(),
             count_ready: HashSet::new()
@@ -222,7 +222,7 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
                 let room = rooms.entry(rid_clone).or_insert(RoomState::new());
                 // room_state = *room;
                 tx = Some(room.tx.clone());
-                let mut us = room.user_set.write().await;
+                let mut us = &mut room.user_set;
                 if !us.contains(&name) {
                     us.insert(name.to_owned());
                     username = name.clone();
@@ -313,7 +313,7 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
                                 // username = name.clone();
                             }
 
-                            let us = room.user_set.read().await;
+                            let us = &mut room.user_set;
                             if room.count_ready.len()>=us.len(){
                                 tracing::debug!("Starting game"); 
                                 let rsc = room.qa_list.to_vec();
@@ -337,43 +337,19 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
     // If any one of the tasks exit, abort the other.
     tokio::select! {
         _ = (&mut send_task) => recv_task.abort(),
-        _ = (&mut recv_task) => {
-            let msg = format!("{} left.", username);
-            tracing::debug!("{}", msg);
-            let _ = tx.send(msg);
-            let mut rooms = spls.rooms.write().await;
-            let mut room = rooms.entry(my_rid2).or_insert(RoomState::new());
-            let mut uset = room.user_set.write().await;
-            let help = uset.remove(&username);
-            
-
-            // state.
-            // let r = 
-            //none of this shit is working, so 
-            // let my_rid2 = my_rid.clone();
-            // let more_rid = my_rid;
-
-            // let mut sc =  state_clone1.clone();
-            // let mut rooms = sc.rooms.write().await;
-            // let mut room = rooms.get_mut(&my_rid2).unwrap();
-            // let mut us = &mut room.user_set;
-            // let m = us.insert(username);
-
-            // let mut room = rooms.get(&my_rid2).expect("room not found");
-            // room.get_mut();
-            // user_set.remove(&username);
-
-            
-            // let mut room = rooms.entry(rid.clone()).or_insert(RoomState::new());
-            // room.
-            send_task.abort()
-
-        }
+        _ = (&mut recv_task) => send_task.abort()
     };
 
-
+    let msg = format!("{} left.", username);
+    tracing::debug!("{}", msg);
+    let _ = tx.send(msg);
+    let mut rooms = spls.rooms.write().await;
+    let mut room = rooms.entry(my_rid2).or_insert(RoomState::new());
+    let mut uset = &mut room.user_set;
+    let help = uset.remove(&username);
+    
     // Send user left message.
-    // let msg = format!("{} left.", username);
+    let msg = format!("{} left.", username);
     // tracing::debug!("{}", msg);
     // let _ = tx.send(msg);
     

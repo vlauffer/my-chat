@@ -39,22 +39,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use rand::{self, thread_rng};
 
 // Our shared state
-struct AppState {
-    user_set: Mutex<HashSet<String>>,
-    tx: broadcast::Sender<String>,
-    qa_list: Vec<ShrekQA>,
-    count_ready: Mutex<u32>
-}
-
-
-
-struct AppStateAll {
-    rooms: Vec<Arc<AppState>>
-}
-
 
 struct RoomState{
-    user_set: HashSet<String>,
+    user_set: Arc<RwLock<HashSet<String>>>,
     tx: broadcast::Sender<String>,
     qa_list: Vec<ShrekQA>,
     count_ready: HashSet<String>
@@ -63,12 +50,11 @@ struct RoomState{
 impl RoomState {
     fn new() -> Self{
         Self{
-            user_set: HashSet::new(),
+            user_set: Arc::new(RwLock::new(HashSet::new())),
             tx: broadcast::channel(100).0,
             qa_list: extract_csv().unwrap(),
             count_ready: HashSet::new()
         }
-        
     }
 }
 struct AppStateController{
@@ -131,30 +117,30 @@ async fn main() {
 }
 
 // #[debug_handler]
-async fn create_room(
-    State(asa): State<Arc<Mutex<AppStateAll>>>
-) -> Result <(), &'static str>{
-    let user_set = Mutex::new(HashSet::new());
-    let (tx, _rx) = broadcast::channel(100);
+// async fn create_room(
+//     State(asa): State<Arc<Mutex<AppStateAll>>>
+// ) -> Result <(), &'static str>{
+//     let user_set = Mutex::new(HashSet::new());
+//     let (tx, _rx) = broadcast::channel(100);
     
-    let mut question_list: Vec<ShrekQA> = vec![];
-    if let Ok(ql) = extract_csv(){
-        question_list = ql;
-    }
-    let app_state = Arc::new(AppState { 
-        user_set, 
-        tx, 
-        qa_list: question_list, 
-        count_ready: Mutex::new(0)
-    });
-    let mut asa_lock = asa.lock().unwrap();
-    asa_lock.rooms.push(app_state);
-    tracing::debug!("New room created! #{}", asa_lock.rooms.len());
+//     let mut question_list: Vec<ShrekQA> = vec![];
+//     if let Ok(ql) = extract_csv(){
+//         question_list = ql;
+//     }
+//     let app_state = Arc::new(AppState { 
+//         user_set, 
+//         tx, 
+//         qa_list: question_list, 
+//         count_ready: Mutex::new(0)
+//     });
+//     let mut asa_lock = asa.lock().unwrap();
+//     asa_lock.rooms.push(app_state);
+//     tracing::debug!("New room created! #{}", asa_lock.rooms.len());
 
-    // asa.loc .rooms.push(app_state);
-    Ok(())
-    // ws.on_upgrade(|socket| websocket(socket, state))
-}
+//     // asa.loc .rooms.push(app_state);
+//     Ok(())
+//     // ws.on_upgrade(|socket| websocket(socket, state))
+// }
 
 
 async fn join_room(
@@ -211,7 +197,7 @@ struct RoomId{
     rid: u32
 }
 
-async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: String) {
+async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: String) {
 
     tracing::debug!("websocket room {}", &rid);
 
@@ -236,8 +222,9 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
                 let room = rooms.entry(rid_clone).or_insert(RoomState::new());
                 // room_state = *room;
                 tx = Some(room.tx.clone());
-                if !room.user_set.contains(&name) {
-                    room.user_set.insert(name.to_owned());
+                let mut us = room.user_set.write().await;
+                if !us.contains(&name) {
+                    us.insert(name.to_owned());
                     username = name.clone();
                 }
             }
@@ -288,8 +275,8 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
     let my_rid= rid.clone();
     let my_rid2 = rid.clone();
 
-    let state_clone1 = state.clone();
-    let state_clone2 = state.clone();
+    let state_clone1 = Arc::clone(&state);
+    // let state_clone2 = state.clone();
     // We need to access the `tx` variable directly again, so we can't shadow it here.
     // I moved the task spawning into a new block so the original `tx` is still visible later.
     let mut recv_task = {
@@ -318,14 +305,16 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
                         tracing::debug!("{name} is ready");
                            
                             let my_rid = my_rid.clone();
-                            let mut rooms = state.rooms.write().await;
+                            let mut rooms = state_clone1.rooms.write().await;
                             let mut room = rooms.entry(my_rid.to_string()).or_insert(RoomState::new());
                             // let c = check_start(room, &mut name);
                             if !room.count_ready.contains(&name) {
                                 room.count_ready.insert(name.to_owned());
                                 // username = name.clone();
                             }
-                            if room.count_ready.len()>=room.user_set.len(){
+
+                            let us = room.user_set.read().await;
+                            if room.count_ready.len()>=us.len(){
                                 tracing::debug!("Starting game"); 
                                 let rsc = room.qa_list.to_vec();
                                 let sm = SocketMessageQAList{
@@ -343,6 +332,8 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
         })
     };
 
+    let spls = Arc::clone(&state);
+
     // If any one of the tasks exit, abort the other.
     tokio::select! {
         _ = (&mut send_task) => recv_task.abort(),
@@ -350,7 +341,14 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
             let msg = format!("{} left.", username);
             tracing::debug!("{}", msg);
             let _ = tx.send(msg);
+            let mut rooms = spls.rooms.write().await;
+            let mut room = rooms.entry(my_rid2).or_insert(RoomState::new());
+            let mut uset = room.user_set.write().await;
+            let help = uset.remove(&username);
+            
 
+            // state.
+            // let r = 
             //none of this shit is working, so 
             // let my_rid2 = my_rid.clone();
             // let more_rid = my_rid;
@@ -400,15 +398,15 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
 //     users_ready.len()>=room.user_set.len()
 // }
 
-fn check_username(state: &AppState, string: &mut String, name: &str) {
-    let mut user_set = state.user_set.lock().unwrap();
+// fn check_username(state: &AppState, string: &mut String, name: &str) {
+//     let mut user_set = state.user_set.lock().unwrap();
 
-    if !user_set.contains(name) {
-        user_set.insert(name.to_owned());
+//     if !user_set.contains(name) {
+//         user_set.insert(name.to_owned());
 
-        string.push_str(name);
-    }
-}
+//         string.push_str(name);
+//     }
+// }
 
 // Include utf-8 file at **compile** time.
 async fn index() -> Html<&'static str> {

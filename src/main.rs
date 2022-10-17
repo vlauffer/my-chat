@@ -286,8 +286,10 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
     });
     
     let my_rid= rid.clone();
-    // let my_rid = Arc::new(rid.clone());
-    // let app
+    let my_rid2 = rid.clone();
+
+    let state_clone1 = state.clone();
+    let state_clone2 = state.clone();
     // We need to access the `tx` variable directly again, so we can't shadow it here.
     // I moved the task spawning into a new block so the original `tx` is still visible later.
     let mut recv_task = {
@@ -297,7 +299,7 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
         // let state_clone = state.clone();
 
         // This task will receive messages from client and send them to broadcast subscribers.
-        tokio::spawn(async move {
+        tokio::spawn( async move {
             while let Some(Ok(Message::Text(text))) = receiver.next().await {
 
                 let socket_message: SocketMessage= serde_json::from_str(&text).unwrap();
@@ -315,9 +317,9 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
                     "ready" => {
                         tracing::debug!("{name} is ready");
                            
-                            let more_rid = &my_rid;
+                            let my_rid = my_rid.clone();
                             let mut rooms = state.rooms.write().await;
-                            let mut room = rooms.entry(more_rid.to_string()).or_insert(RoomState::new());
+                            let mut room = rooms.entry(my_rid.to_string()).or_insert(RoomState::new());
                             // let c = check_start(room, &mut name);
                             if !room.count_ready.contains(&name) {
                                 room.count_ready.insert(name.to_owned());
@@ -348,8 +350,22 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
             let msg = format!("{} left.", username);
             tracing::debug!("{}", msg);
             let _ = tx.send(msg);
+
+            //none of this shit is working, so 
+            // let my_rid2 = my_rid.clone();
             // let more_rid = my_rid;
-            // let mut rooms =  state.rooms.write().await;
+
+            // let mut sc =  state_clone1.clone();
+            // let mut rooms = sc.rooms.write().await;
+            // let mut room = rooms.get_mut(&my_rid2).unwrap();
+            // let mut us = &mut room.user_set;
+            // let m = us.insert(username);
+
+            // let mut room = rooms.get(&my_rid2).expect("room not found");
+            // room.get_mut();
+            // user_set.remove(&username);
+
+            
             // let mut room = rooms.entry(rid.clone()).or_insert(RoomState::new());
             // room.
             send_task.abort()
@@ -359,15 +375,10 @@ async fn websocket(stream: WebSocket, state: Arc<AppStateController>, rid: Strin
 
 
     // Send user left message.
-    let msg = format!("{} left.", username);
-    tracing::debug!("{}", msg);
-    let _ = tx.send(msg);
-
+    // let msg = format!("{} left.", username);
+    // tracing::debug!("{}", msg);
+    // let _ = tx.send(msg);
     
-    
-    
-    
-
     // Remove username from map so new clients can take it.
     // rooms.get_mut(&channel).unwrap().user_set.remove(&username);
 

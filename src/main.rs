@@ -209,8 +209,6 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
     let mut tx = None::<broadcast::Sender<String>>;
     let mut username = String::new();
     let mut channel = String::new();
-    
-    
 
     while let Some(Ok(message)) = receiver.next().await {
         if let Message::Text(name) = message {
@@ -307,10 +305,8 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
                             let my_rid = my_rid.clone();
                             let mut rooms = state_clone1.rooms.write().await;
                             let mut room = rooms.entry(my_rid.to_string()).or_insert(RoomState::new());
-                            // let c = check_start(room, &mut name);
                             if !room.count_ready.contains(&name) {
                                 room.count_ready.insert(name.to_owned());
-                                // username = name.clone();
                             }
 
                             let us = &mut room.user_set;
@@ -325,24 +321,18 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
                             }       
                     },
                     "answer" => tracing::debug!("ans"),
-                    // _ if socket_message.sm_type.equals("message") => print!("message"),
-                    _ => print!("none")
+                    _ => tracing::debug!("none")
                 };
             }
         })
     };
-
-    let spls = Arc::clone(&state);
 
     // If any one of the tasks exit, abort the other.
     tokio::select! {
         _ = (&mut send_task) => recv_task.abort(),
         _ = (&mut recv_task) => send_task.abort()
     };
-
-    let msg = format!("{} left.", username);
-    tracing::debug!("{}", msg);
-    let _ = tx.send(msg);
+    let spls = Arc::clone(&state);
     let mut rooms = spls.rooms.write().await;
     let mut room = rooms.entry(my_rid2).or_insert(RoomState::new());
     let mut uset = &mut room.user_set;
@@ -350,11 +340,9 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
     
     // Send user left message.
     let msg = format!("{} left.", username);
-    // tracing::debug!("{}", msg);
-    // let _ = tx.send(msg);
-    
-    // Remove username from map so new clients can take it.
-    // rooms.get_mut(&channel).unwrap().user_set.remove(&username);
+    tracing::debug!("{}", msg);
+    let _ = tx.send(msg);
+
 
     // TODO: Check if the room is empty now and remove the `RoomState` from the map.
 }

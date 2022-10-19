@@ -61,6 +61,18 @@ struct AppStateController{
     rooms: RwLock<HashMap<String, RoomState>>
 }
 
+impl AppStateController{
+
+    fn new()->Self{
+
+        let hm = RwLock::new(HashMap::from([("1".to_owned(), RoomState::new())]));
+        Self{
+            rooms: hm
+        }
+    }
+}
+
+
 #[derive(Debug)]
 enum SMType{
     Message,
@@ -92,16 +104,12 @@ async fn main() {
     // let qalist = make_list();
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "example_chat=trace".into()),
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "my_chat=trace".into()),
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
-    
-    let app_state_all = Arc::new(AppStateController{
-        rooms: RwLock::new( HashMap::new())
-    });
 
-    let app = Router::with_state(app_state_all)
+    let app = Router::with_state(Arc::new(AppStateController::new()))
         .route("/", get(index))
         // .route("/create_room", get(create_room))
         .route("/websocket/:id", get(join_room))
@@ -110,6 +118,7 @@ async fn main() {
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     tracing::debug!("listening on {}", addr);
+    print!("fuck");
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
@@ -151,22 +160,6 @@ async fn join_room(
     ws.on_upgrade(|socket| websocket(socket, state, rid))
 }
 
-async fn extract_params(Query(params): Query<Params>) -> Option<usize> {
-    
-    match params.room_num {
-        Some(p) => {
-            tracing::debug!("room_id #{:?} extracted", p);
-            // format!("{:?}", p);
-            Some(p)
-        },
-        None => {
-            tracing::debug!("Could not read params");
-            // format!("{:?}", params);
-            None
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct RoomCheck{
     joinable: bool,
@@ -186,7 +179,7 @@ async fn check_room(
         },
 
         _ => {
-            let help = RoomCheck{joinable: true, room: rid};
+            let help = RoomCheck{joinable: false, room: rid};
             return (StatusCode::NOT_FOUND, Json(help))
         }
     }
@@ -213,31 +206,47 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
     while let Some(Ok(message)) = receiver.next().await {
         if let Message::Text(name) = message {
 
-            {
-                // let state_clone = state.clone();
-                let rid_clone = rid.clone();
-                let mut rooms = state.rooms.write().await;
-                let room = rooms.entry(rid_clone).or_insert(RoomState::new());
-                // room_state = *room;
+            {   //check if the room or user exists before writing 
+                let mut rooms = state.rooms.read().await;
+                let mut room = match rooms.get(&rid){
+              
+                    Some(r) => r,
+                    None => {
+                        let _ = sender
+                            .send(Message::Text(format!("room {} not found", &rid)))
+                            .await;
+                        tracing::debug!("room {} not found", &rid); 
+                        return
+                    } 
+                }; 
+
+                if room.user_set.contains(&name){
+                    // Only send our client that username is taken.
+                    let _ = sender
+                        .send(Message::Text(format!("Username {} already taken, or sender is not Some", &name)))
+                        .await;
+                    return
+                }
                 tx = Some(room.tx.clone());
-                let mut us = &mut room.user_set;
-                if !us.contains(&name) {
-                    us.insert(name.to_owned());
+
+                // drop to unlock 
+            }{
+
+                // write to the AppStateController
+                let mut write_rooms = state.rooms.write().await;
+                let mut write_room = write_rooms
+                    .entry(String::from(&rid))
+                    .or_insert(RoomState::new());
+                let mut write_user_set = &mut write_room.user_set;
+                if !write_user_set.contains(&name) {
+                    write_user_set.insert(name.to_owned());
                     username = name.clone();
                 }
             }
             // If not empty we want to quit the loop else we want to quit function.
-            if tx.is_some() && !username.is_empty() {
-   
+            if tx.is_some() && !username.is_empty() { //not necessary
                 break;
-            } else {
-                // Only send our client that username is taken.
-                let _ = sender
-                    .send(Message::Text(String::from("Username already taken, or sender is not Some")))
-                    .await;
-
-                return;
-            }
+            } 
         }
     }
 
@@ -256,9 +265,6 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
     };
     let str_mes = serde_json::to_string(&m).unwrap();
     let _ = tx.send(str_mes );
-
-
-    // let mut app_state = state.;
 
     // This task will receive broadcast messages and send text message to our client.
     let mut send_task = tokio::spawn(async move {
@@ -376,154 +382,6 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
 async fn index() -> Html<&'static str> {
     Html(std::include_str!("../assets/chat.html"))
 }
-
-
-// async fn websocket(stream: WebSocket, state: Arc<AppStateController>) {
-
-//     // By splitting we can send and receive at the same time.
-//     let (mut sender, mut receiver) = stream.split();
-    
-//     // Username gets set in the receive loop, if it's valid.
-//     let mut username = String::new();
-//     // Loop until a text message is found.
-//     while let Some(Ok(message)) = receiver.next().await {
-//         if let Message::Text(name) = message {
-//             // If username that is sent by client is not taken, fill username string.
-//             check_username(&state, &mut username, &name);
-
-//             // If not empty we want to quit the loop else we want to quit function.
-//             if !username.is_empty() {
-//                 // create_user(name);
-//                 break;
-//             } else {
-//                 // Only send our client that username is taken.
-//                 let _ = sender
-//                     .send(Message::Text(String::from("Username already taken.")))
-//                     .await;
-
-//                 return;
-//             }
-//         }
-//     }
-
-//     // Subscribe before sending joined message.
-//     let mut rx = state.tx.subscribe();
-
-//     // Clone a subsect of questions
-//     let mut qa_list_clone = state.qa_list.clone();
-
-//     // Send joined message to all subscribers.
-//     let msg = format!("{} joined.", username);
-//     tracing::debug!("{}", msg);
-//     let sm = SocketMessage{
-//         sm_type: SMType::Join.as_str(),
-//         payload: msg,
-//         username: username.clone()
-//     };
-    
-//     let _ = state.tx.send(serde_json::to_string(&sm).unwrap());
-
-//     // This task will receive broadcast messages and send text message to our client.
-//     let mut send_task = tokio::spawn(async move {
-//         while let Ok(text) = rx.recv().await {
-
-//             // In any websocket error, break loop.
-//             if sender.send(Message::Text(text)).await.is_err() {
-//                 break;
-//             }
-//         }
-//     });
-
-//     // let _ = state.tx.send(serde_json::to_string(&state.qa_list[0]).unwrap());
-//     // let qa_list_clone = serde_json::to_string(&state.qa_list).unwrap();
-//     // let serialized_user = serde_json::to_string(&user).unwrap();
-
-
-//     // Clone things we want to pass to the receiving task.
-//     let tx = state.tx.clone();
-//     let name = username.clone();
-//     let mut prog = 0;
-    
-//     // const l: String = String::from("s");
-//     let mut state_clone = state.clone();
-//     // This task will receive messages from client and send them to broadcast subscribers.
-//     let mut recv_task = tokio::spawn(async move {
-//         while let Some(Ok(Message::Text(text))) = receiver.next().await {
-            
-//             // let Json()
-//             // let helpme: User = serde_json::from_str(&text).unwrap();
-//             let socket_message: SocketMessage= serde_json::from_str(&text).unwrap();
-//             match &socket_message.sm_type[..] {
-//                 "message" => {
-//                     tracing::debug!("mes");
-//                     let m = SocketMessage{
-//                         username: name.clone(),
-//                         payload: format!(": {}", socket_message.payload) ,
-//                         sm_type: SMType::Message.as_str(),
-//                     };
-//                     let str_mes = serde_json::to_string(&m).unwrap();
-//                     let _ = tx.send(str_mes );
-//                 },
-//                 "ready" => {
-//                     tracing::debug!("{name} is ready");
-//                     if let check = check_start(&state_clone){
-//                         tracing::debug!("Starting game"); 
-
-//                         let sm = SocketMessageQAList{
-//                             payload: qa_list_clone.clone(),
-//                             sm_type: SMType::QA_list.as_str()
-//                         }; 
-//                         let _ = tx.send(serde_json::to_string(&sm).unwrap());
-//                     };
-//                     // check_start(state);
-//                 },
-//                 "answer" => tracing::debug!("ans"),
-//                 // _ if socket_message.sm_type.equals("message") => print!("message"),
-//                 _ => print!("none")
-//             };
-
-//             // Add username before message.
-//             // serde_json::from_str(&text);
-//             // let _ = tx.send(format!("{}: {}", name, text));
-            
-//         }
-//     });
-
-//     // If any one of the tasks exit, abort the other.
-//     tokio::select! {
-//         _ = (&mut send_task) => recv_task.abort(),
-//         _ = (&mut recv_task) => send_task.abort(),
-//     };
-
-//     // Send user left message.
-//     let msg = format!("{} left.", username);
-//     tracing::debug!("{}", msg);
-//     let _ = state.tx.send(msg);
-//     // Remove username from map so new clients can take it.
-//     state.user_set.lock().unwrap().remove(&username);
-// }
-
-
-// async fn parse_req( 
-//     Json(payload): Json<Answer>,
-// ) -> impl IntoResponse {
-//     let req_ans= Answer{
-//         ans: payload.ans,
-//         correct: payload.correct
-//     };
-//     (StatusCode::CREATED, Json(req_ans))
-// } 
-
-// middleware that shows how to consume the request body upfront
-// async fn print_request_body(
-//     request: Request<BoxBody>,
-//     next: Next<BoxBody>,
-// ) -> Result<impl IntoResponse, Response> {
-//     let request = buffer_request_body(request).await?;
-
-//     Ok(next.run(request).await)
-// }
-
 
 
 

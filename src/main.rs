@@ -118,7 +118,6 @@ async fn main() {
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     tracing::debug!("listening on {}", addr);
-    print!("fuck");
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
@@ -194,14 +193,13 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
 
     tracing::debug!("websocket room {}", &rid);
 
-    let mut username = String::new();
+    
     // By splitting we can send and receive at the same time.
     let (mut sender, mut receiver) = stream.split();
     
     // We have more state now that needs to be pulled out of the connect loop
     let mut tx = None::<broadcast::Sender<String>>;
     let mut username = String::new();
-    let mut channel = String::new();
 
     while let Some(Ok(message)) = receiver.next().await {
         if let Message::Text(name) = message {
@@ -276,10 +274,9 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
         }
     });
     
-    let my_rid= rid.clone();
-    let my_rid2 = rid.clone();
 
-    let state_clone1 = Arc::clone(&state);
+
+    // let state_clone1 = Arc::clone(&state); //doubt
     // let state_clone2 = state.clone();
     // We need to access the `tx` variable directly again, so we can't shadow it here.
     // I moved the task spawning into a new block so the original `tx` is still visible later.
@@ -287,7 +284,9 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
         // Clone things we want to pass to the receiving task.
         let tx = tx.clone();
         let mut name = username.clone();
-        // let state_clone = state.clone();
+        let rid_c=rid.clone();
+        let state_clone1 = state.clone();
+        
 
         // This task will receive messages from client and send them to broadcast subscribers.
         tokio::spawn( async move {
@@ -308,8 +307,8 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
                     "ready" => {
                         tracing::debug!("{name} is ready");
                            
-                            let my_rid = my_rid.clone();
-                            let mut rooms = state_clone1.rooms.write().await;
+                            let my_rid = &rid_c;
+                            let mut rooms = state_clone1.rooms.write().await; 
                             let mut room = rooms.entry(my_rid.to_string()).or_insert(RoomState::new());
                             if !room.count_ready.contains(&name) {
                                 room.count_ready.insert(name.to_owned());
@@ -338,11 +337,12 @@ async fn websocket(stream: WebSocket, mut state: Arc<AppStateController>, rid: S
         _ = (&mut send_task) => recv_task.abort(),
         _ = (&mut recv_task) => send_task.abort()
     };
-    let spls = Arc::clone(&state);
-    let mut rooms = spls.rooms.write().await;
-    let mut room = rooms.entry(my_rid2).or_insert(RoomState::new());
-    let mut uset = &mut room.user_set;
-    let help = uset.remove(&username);
+    
+    // let spls = &state;
+    let mut rooms = &mut state.rooms.write().await;
+    let mut room = rooms.entry(String::from(&rid)).or_insert(RoomState::new());
+    let help = room.user_set.remove(&username);
+    let help = room.count_ready.remove(&username);
     
     // Send user left message.
     let msg = format!("{} left.", username);

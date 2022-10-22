@@ -32,6 +32,7 @@
         <h1>Shrek-off</h1>
 
         <input id="username" style="display:block; width:100px; box-sizing: border-box" type="text" placeholder="username">
+        <input id="room_id" style="display:block; width:100px; box-sizing: border-box" type="text" placeholder="room_id">
         <button id="join-chat" type="button">join chat</button>
         <textarea id="chat" style="display:block; width:600px; height:120px; box-sizing: border-box" cols="30" rows="10"></textarea>
         <input id="input" style="display:block; width:600px; box-sizing: border-box" type="text" placeholder="chat">
@@ -40,6 +41,7 @@
         <script>
 
             const username = document.querySelector("#username");
+            const room_id= document.querySelector("#room_id");
             const join_btn = document.querySelector("#join-chat");
             const textarea = document.querySelector("#chat");
             const input = document.querySelector("#input");
@@ -49,7 +51,7 @@
             const handleWebsockets = (rid) => {
                 
                 console.log(rid)
-                const websocket = new WebSocket("ws://localhost:3000/websocket/12");
+                const websocket = new WebSocket(`ws://localhost:3000/websocket/${rid}`);
 
                 websocket.onopen = function() {
                     console.log("connection opened");
@@ -66,13 +68,13 @@
                 websocket.onmessage = function(e) {
                     console.log("received message: "+e.data);
                     var data = JSON.parse(e.data)
-                    if(data.sm_type=="message"){
+                    if(data.sm_type=="Message"){
                         
                         textarea.value += data.username+ data.payload+"\r\n";
-                    }else if(data.sm_type==="join"){
-
+                    }else if(data.sm_type==="Join"){
+                        console.log(data);
                         textarea.value += data.payload+"\r\n";
-                    } else if(data.sm_type === "qa_list"){
+                    } else if(data.sm_type === "QA_list"){
 
                         questions = data.payload;
                         console.log(data.payload)
@@ -93,20 +95,7 @@
                             
                             document.body.appendChild(btn_section)
                         });
-                        // for(var i = 0; i<questions.length; i++){
-                        //     console.log(i)
-                        //     let btn = document.createElement("button");
-                        //     btn.innerHTML = questions[i].ans;
-                        //     btn.type = "submit";
-                        //     btn.name = "questionBtn";
-                        //     btn_section.appendChild(btn);
-                        // }
-                        // ;
-                        // console.log(data);
                     }
-                    
-                    
-                    
                 }
 
                 input.onkeydown = function(e) {
@@ -133,7 +122,7 @@
 
             join_btn.addEventListener("click", function(e) {
 
-                fetch("http://localhost:3000/12")
+                fetch(`http://localhost:3000/${room_id.value}`)
                 .then(response => response.json()).then(r => {
                     if (r.joinable){
                         handleWebsockets(r.room);
